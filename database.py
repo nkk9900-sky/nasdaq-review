@@ -1,10 +1,28 @@
 import os
+import time
 import sqlite3
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import json
 
 DB_PATH = "trades.db"
+
+def _sb_retry(fn, max_attempts=3):
+    """Supabase HTTP 호출 시 [Errno 11] Resource temporarily unavailable 등 일시 오류 재시도."""
+    last = None
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except Exception as e:
+            last = e
+            if attempt >= max_attempts - 1:
+                raise
+            s = str(e).lower()
+            if "errno 11" in s or "temporarily unavailable" in s or "resource temporarily" in s or "readerror" in s:
+                time.sleep(1.0)
+                continue
+            raise
+    raise last
 
 # Supabase 사용 여부 (Streamlit Cloud 등에서 환경변수 설정 시)
 USE_SUPABASE = bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"))
@@ -190,8 +208,10 @@ def save_paired_trades_batch(trades: List[Dict]) -> int:
 def get_available_dates() -> List[str]:
     sb = _sb()
     if sb:
-        r = sb.table("paired_trades").select("settlement_date").not_.is_("settlement_date", "null").execute()
-        dates = list({row["settlement_date"] for row in (r.data or [])})
+        def _fetch():
+            r = sb.table("paired_trades").select("settlement_date").not_.is_("settlement_date", "null").execute()
+            return list({row["settlement_date"] for row in (r.data or [])})
+        dates = _sb_retry(_fetch)
         dates.sort(reverse=True)
         return dates
     if USE_SUPABASE:
@@ -221,11 +241,13 @@ def _row_to_trade(row: Dict) -> Dict:
 def get_paired_trades_by_date(trade_date: str, symbol: Optional[str] = None) -> List[Dict]:
     sb = _sb()
     if sb:
-        q = sb.table("paired_trades").select("*").eq("settlement_date", trade_date).order("entry_time_kst")
-        if symbol:
-            q = q.eq("symbol", symbol)
-        r = q.execute()
-        return [_row_to_trade(row) for row in (r.data or [])]
+        def _fetch():
+            q = sb.table("paired_trades").select("*").eq("settlement_date", trade_date).order("entry_time_kst")
+            if symbol:
+                q = q.eq("symbol", symbol)
+            r = q.execute()
+            return [_row_to_trade(row) for row in (r.data or [])]
+        return _sb_retry(_fetch)
     if USE_SUPABASE:
         return []
     conn = get_connection()
@@ -241,8 +263,10 @@ def get_paired_trades_by_date(trade_date: str, symbol: Optional[str] = None) -> 
 def get_all_paired_trades() -> List[Dict]:
     sb = _sb()
     if sb:
-        r = sb.table("paired_trades").select("*").order("entry_time_cst", desc=True).execute()
-        return [_row_to_trade(row) for row in (r.data or [])]
+        def _fetch():
+            r = sb.table("paired_trades").select("*").order("entry_time_cst", desc=True).execute()
+            return [_row_to_trade(row) for row in (r.data or [])]
+        return _sb_retry(_fetch)
     if USE_SUPABASE:
         return []
     conn = get_connection()
@@ -293,8 +317,10 @@ def migrate_from_json(json_file: str = "saved_trades.json") -> int:
 def check_date_exists(trade_date: str) -> bool:
     sb = _sb()
     if sb:
-        r = sb.table("paired_trades").select("id").eq("trade_date_cst", trade_date).limit(1).execute()
-        return len(r.data or []) > 0
+        def _fetch():
+            r = sb.table("paired_trades").select("id").eq("trade_date_cst", trade_date).limit(1).execute()
+            return len(r.data or []) > 0
+        return _sb_retry(_fetch)
     if USE_SUPABASE:
         return False
     conn = get_connection()
@@ -347,8 +373,10 @@ def save_candle_data(trade_date: str, symbol: str, timeframe: str, candles: List
 def get_cached_candles(trade_date: str, symbol: str, timeframe: str) -> List[Dict]:
     sb = _sb()
     if sb:
-        r = sb.table("candle_cache").select("timestamp,open,high,low,close,volume").eq("trade_date", trade_date).eq("symbol", symbol).eq("timeframe", timeframe).order("timestamp").execute()
-        return [{"timestamp": row["timestamp"], "open": row["open"], "high": row["high"], "low": row["low"], "close": row["close"], "volume": row.get("volume", 0)} for row in (r.data or [])]
+        def _fetch():
+            r = sb.table("candle_cache").select("timestamp,open,high,low,close,volume").eq("trade_date", trade_date).eq("symbol", symbol).eq("timeframe", timeframe).order("timestamp").execute()
+            return [{"timestamp": row["timestamp"], "open": row["open"], "high": row["high"], "low": row["low"], "close": row["close"], "volume": row.get("volume", 0)} for row in (r.data or [])]
+        return _sb_retry(_fetch)
     if USE_SUPABASE:
         return []
     conn = get_connection()
@@ -361,8 +389,10 @@ def get_cached_candles(trade_date: str, symbol: str, timeframe: str) -> List[Dic
 def has_cached_candles(trade_date: str, symbol: str, timeframe: str) -> bool:
     sb = _sb()
     if sb:
-        r = sb.table("candle_cache").select("id").eq("trade_date", trade_date).eq("symbol", symbol).eq("timeframe", timeframe).limit(1).execute()
-        return len(r.data or []) > 0
+        def _fetch():
+            r = sb.table("candle_cache").select("id").eq("trade_date", trade_date).eq("symbol", symbol).eq("timeframe", timeframe).limit(1).execute()
+            return len(r.data or []) > 0
+        return _sb_retry(_fetch)
     if USE_SUPABASE:
         return False
     conn = get_connection()
@@ -451,4 +481,7 @@ def import_from_sqlite(db_path: str) -> tuple:
 
 
 if not USE_SUPABASE:
-    init_db()
+    try:
+        init_db()
+    except Exception:
+        pass

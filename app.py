@@ -485,7 +485,10 @@ if available_dates:
     
     with st.sidebar.expander("날짜별 데이터 삭제"):
         delete_date = st.selectbox("삭제할 날짜", available_dates, key="delete_date")
-        trades_count = len(db.get_paired_trades_by_date(delete_date))
+        try:
+            trades_count = len(db.get_paired_trades_by_date(delete_date))
+        except Exception:
+            trades_count = 0
         st.caption(f"해당 날짜 거래: {trades_count}건")
         
         if st.button(f"{delete_date} 데이터 삭제", type="secondary"):
@@ -554,7 +557,12 @@ if available_dates:
         db.clear_candle_cache(selected_date)
         st.rerun()
     
-    all_day_trades = load_trades_by_date(selected_date)
+    try:
+        all_day_trades = load_trades_by_date(selected_date)
+    except Exception as e:
+        st.error("DB 연결이 일시적으로 불안정합니다. 잠시 후 **새로고침** 해 주세요.")
+        st.caption(str(e))
+        st.stop()
     
     if not all_day_trades:
         st.warning(f"{selected_date}에 해당하는 거래가 없습니다.")

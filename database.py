@@ -458,11 +458,10 @@ def clear_candle_cache(trade_date: str = None):
     conn.commit()
     conn.close()
 
-def import_from_sqlite(db_path: str) -> tuple:
+def import_from_sqlite(db_path: str, skip_candles: bool = False) -> tuple:
     """
     Replit 등에서 받은 trades.db(SQLite) 내용을 현재 DB(Supabase 또는 SQLite)로 옮깁니다.
-    거래 + 캔들 캐시를 모두 복사하므로, 옮긴 뒤 과거 날짜 차트도 그대로 나옵니다.
-    Supabase는 배치 삽입으로 전체가 들어가도록 함.
+    skip_candles=True면 거래만 넣고 캔들은 생략 (타임아웃 방지용).
     반환: (넣은 거래 수, 넣은 캔들 수)
     """
     if not os.path.isfile(db_path):
@@ -500,28 +499,28 @@ def import_from_sqlite(db_path: str) -> tuple:
                 }
                 save_paired_trade(trade)
                 trades_done += 1
-        # candle_cache: (trade_date, symbol, timeframe)별로 묶어서 save_candle_data
-        cur.execute("""SELECT trade_date, symbol, timeframe, timestamp, open, high, low, close, volume FROM candle_cache ORDER BY trade_date, symbol, timeframe, timestamp""")
-        rows = cur.fetchall()
+        # candle_cache (skip_candles면 생략)
+        if not skip_candles:
+            cur.execute("""SELECT trade_date, symbol, timeframe, timestamp, open, high, low, close, volume FROM candle_cache ORDER BY trade_date, symbol, timeframe, timestamp""")
+            rows = cur.fetchall()
+            from collections import defaultdict
+            grouped = defaultdict(list)
+            for row in rows:
+                r = dict(row)
+                key = (r["trade_date"], r["symbol"], r["timeframe"])
+                grouped[key].append({
+                    "timestamp": r["timestamp"],
+                    "open": r["open"], "high": r["high"], "low": r["low"], "close": r["close"],
+                    "volume": r.get("volume", 0),
+                })
+            for (td, sym, tf), candles in grouped.items():
+                candles_done += save_candle_data(td, sym, tf, candles)
         src.close()
-        from collections import defaultdict
-        grouped = defaultdict(list)
-        for row in rows:
-            r = dict(row)
-            key = (r["trade_date"], r["symbol"], r["timeframe"])
-            grouped[key].append({
-                "timestamp": r["timestamp"],
-                "open": r["open"], "high": r["high"], "low": r["low"], "close": r["close"],
-                "volume": r.get("volume", 0),
-            })
-        for (td, sym, tf), candles in grouped.items():
-            candles_done += save_candle_data(td, sym, tf, candles)
         return (trades_done, candles_done)
     except Exception as e:
-        print(f"Import from SQLite error: {e}")
         import traceback
         traceback.print_exc()
-        return (0, 0)
+        raise
 
 
 if not USE_SUPABASE:

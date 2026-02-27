@@ -441,21 +441,30 @@ with st.sidebar:
             st.rerun()
     
     with st.sidebar.expander("Replit 데이터 가져오기"):
-        st.caption("Replit에서 받은 trades.db를 올리면 거래+차트 캐시가 여기(Supabase)로 복사됩니다. 1/26부터 쌓인 데이터 한 번에 옮기세요.")
+        st.caption("Replit에서 받은 trades.db를 올리면 거래(+캔들)가 Supabase로 복사됩니다.")
         db_file = st.file_uploader("trades.db 파일", type=["db"], key="replit_db")
+        skip_candles = st.checkbox("거래만 가져오기 (캔들은 제외, 먼저 시도해 보세요)", value=True, key="import_skip_candles")
         if db_file:
             if st.button("지금 가져오기", type="primary", key="do_import"):
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as tmp:
-                    tmp.write(db_file.getvalue())
-                    tmp_path = tmp.name
+                fd, tmp_path = tempfile.mkstemp(suffix=".db")
                 try:
-                    trades_count, candles_count = db.import_from_sqlite(tmp_path)
-                    st.success(f"가져오기 완료: 거래 {trades_count}건, 캔들 캐시 {candles_count}건")
+                    os.write(fd, db_file.getvalue())
+                    os.close(fd)
+                    fd = None
+                    with st.spinner("가져오는 중… (거래 519건 배치 업로드)" if skip_candles else "가져오는 중… (거래+캔들, 1~2분 걸릴 수 있음)"):
+                        trades_count, candles_count = db.import_from_sqlite(tmp_path, skip_candles=skip_candles)
+                    st.success(f"가져오기 완료: 거래 {trades_count}건" + (f", 캔들 {candles_count}건" if candles_count else ""))
                     st.session_state.focused_idx = None
                     st.rerun()
                 except Exception as e:
-                    st.error(f"오류: {e}")
+                    st.error("가져오기 실패 — 아래 내용 복사해서 알려주세요")
+                    st.code(traceback.format_exc(), language="text")
                 finally:
+                    if fd is not None:
+                        try:
+                            os.close(fd)
+                        except Exception:
+                            pass
                     try:
                         os.unlink(tmp_path)
                     except Exception:

@@ -1,5 +1,6 @@
 [server]
-headless = false
-address = "127.0.0.1"
+headless = true
 port = 8501
-browserServerAddress = "localhost"
+
+[browser]
+gatherUsageStats = false

@@ -219,13 +219,15 @@ def _trade_row_from_sqlite(r: dict) -> dict:
         "settlement_date": r.get("settlement_date") or get_settlement_date(entry_kst),
     }
 
-def insert_paired_trades_batch_supabase(rows: List[dict], batch_size: int = 80) -> int:
-    """Supabase에 거래를 배치로 삽입 (가져오기 시 타임아웃 방지)."""
+def insert_paired_trades_batch_supabase(rows: List[dict], batch_size: int = 40) -> int:
+    """Supabase에 거래를 배치로 삽입. 배치 사이 대기로 rate limit/타임아웃 완화."""
     sb = _sb()
     if not sb:
         return 0
     total = 0
     for i in range(0, len(rows), batch_size):
+        if i > 0:
+            time.sleep(1.2)
         chunk = rows[i : i + batch_size]
         def _insert_chunk():
             sb.table("paired_trades").insert(chunk).execute()
@@ -235,11 +237,13 @@ def insert_paired_trades_batch_supabase(rows: List[dict], batch_size: int = 80) 
             total += n
         except Exception:
             for row in chunk:
-                try:
-                    _sb_retry(lambda r=row: sb.table("paired_trades").insert(r).execute())
-                    total += 1
-                except Exception:
-                    pass
+                for _ in range(3):
+                    try:
+                        _sb_retry(lambda r=row: sb.table("paired_trades").insert(r).execute())
+                        total += 1
+                        break
+                    except Exception:
+                        time.sleep(1.0)
     return total
 
 def get_available_dates() -> List[str]:

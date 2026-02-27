@@ -1,20 +1,23 @@
 import streamlit as st
-import pandas as pd
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import yfinance as yf
-from datetime import datetime, timedelta
-import pytz
-import tempfile
-import os
-from io import BytesIO
 import traceback
+
+st.set_page_config(page_title="나스닥 선물 복기 대시보드", page_icon="📈", layout="wide")
+
 try:
+    import pandas as pd
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+    import yfinance as yf
+    from datetime import datetime, timedelta
+    import pytz
+    import tempfile
+    import os
+    from io import BytesIO
     import database as db
     import kis_api
     import trade_classifier
 except Exception as _e:
-    st.error("모듈 로드 오류 (아래 내용을 복사해서 알려주세요)")
+    st.error("앱 로드 실패 (아래 내용 복사해서 알려주세요)")
     st.code(traceback.format_exc())
     st.stop()
 
@@ -58,12 +61,6 @@ def save_trades_to_db(trades):
             'symbol': symbol
         }
         db.save_paired_trade(trade_data)
-
-st.set_page_config(
-    page_title="나스닥 선물 복기 대시보드",
-    page_icon="📈",
-    layout="wide"
-)
 
 if 'focused_idx' not in st.session_state:
     st.session_state.focused_idx = None
@@ -385,18 +382,22 @@ def save_candles_to_cache(df, trade_date, symbol, timeframe):
 st.title("나스닥 선물 복기 대시보드")
 
 with st.sidebar:
-    # DB 연결 상태 먼저 표시 (배포 시 연결 여부 바로 확인)
-    st.subheader("DB 연결 상태")
-    db._sb()  # 한 번 호출해서 연결 시도
-    if getattr(db, "USE_SUPABASE", False):
-        if getattr(db, "SUPABASE_INIT_ERROR", None):
-            st.error("Supabase 연결 실패")
-            st.caption(db.SUPABASE_INIT_ERROR[:120] + ("…" if len(db.SUPABASE_INIT_ERROR) > 120 else ""))
-            st.caption("→ Streamlit Cloud: Settings → Secrets 에 SUPABASE_URL, SUPABASE_KEY 확인 후 앱 재시작")
+    try:
+        st.subheader("DB 연결 상태")
+        db._sb()
+        if getattr(db, "USE_SUPABASE", False):
+            if getattr(db, "SUPABASE_INIT_ERROR", None):
+                st.error("Supabase 연결 실패")
+                err = getattr(db, "SUPABASE_INIT_ERROR", "") or ""
+                st.caption(str(err)[:120] + ("…" if len(err) > 120 else ""))
+                st.caption("→ Settings → Secrets: SUPABASE_URL, SUPABASE_KEY 확인 후 재시작")
+            else:
+                st.success("Supabase 연결됨")
         else:
-            st.success("Supabase 연결됨 (데이터 유지)")
-    else:
-        st.info("로컬 DB (SQLite) — 배포 앱에서는 재시작 시 데이터 사라질 수 있음")
+            st.info("로컬 DB (SQLite)")
+    except Exception as e:
+        st.warning("DB 상태 확인 중 오류")
+        st.caption(str(e)[:100])
     st.divider()
     st.header("파일 업로드")
     

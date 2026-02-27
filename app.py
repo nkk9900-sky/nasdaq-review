@@ -8,9 +8,15 @@ import pytz
 import tempfile
 import os
 from io import BytesIO
-import database as db
-import kis_api
-import trade_classifier
+import traceback
+try:
+    import database as db
+    import kis_api
+    import trade_classifier
+except Exception as _e:
+    st.error("모듈 로드 오류 (아래 내용을 복사해서 알려주세요)")
+    st.code(traceback.format_exc())
+    st.stop()
 
 def load_trades_by_date(trade_date: str):
     db_trades = db.get_paired_trades_by_date(trade_date)
@@ -402,10 +408,18 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"오류: {e}")
     
-    available_dates = db.get_available_dates()
+    try:
+        available_dates = db.get_available_dates()
+    except Exception as e:
+        st.sidebar.error("DB 조회 오류 (아래 내용 복사해서 알려주세요)")
+        st.sidebar.code(traceback.format_exc())
+        available_dates = []
     if available_dates:
         st.divider()
-        total_trades = len(db.get_all_paired_trades())
+        try:
+            total_trades = len(db.get_all_paired_trades())
+        except Exception:
+            total_trades = 0
         st.info(f"저장된 거래: {total_trades}건 ({len(available_dates)}일)")
         # 배포 환경에서 데이터 유지 여부 확인용
         if getattr(db, "SUPABASE_INIT_ERROR", None):
@@ -440,7 +454,12 @@ with st.sidebar:
                     except Exception:
                         pass
 
-available_dates = db.get_available_dates()
+try:
+    available_dates = db.get_available_dates()
+except Exception as e:
+    st.error("DB 조회 오류 (아래 내용 복사해서 알려주세요)")
+    st.code(traceback.format_exc())
+    available_dates = []
 
 if available_dates:
     st.sidebar.divider()

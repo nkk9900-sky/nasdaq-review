@@ -201,6 +201,47 @@ def save_paired_trades_batch(trades: List[Dict]) -> int:
         count += 1
     return count
 
+def _trade_row_from_sqlite(r: dict) -> dict:
+    """SQLite 한 행을 Supabase paired_trades 행으로 변환."""
+    entry_kst = r["entry_time_kst"]
+    entry_cst = r["entry_time_cst"]
+    return {
+        "entry_time_kst": entry_kst if isinstance(entry_kst, str) else (entry_kst.strftime('%Y-%m-%dT%H:%M:%S') if hasattr(entry_kst, 'strftime') else str(entry_kst)),
+        "entry_time_cst": entry_cst if isinstance(entry_cst, str) else (entry_cst.strftime('%Y-%m-%dT%H:%M:%S') if hasattr(entry_cst, 'strftime') else str(entry_cst)),
+        "exit_time_kst": r["exit_time_kst"] if isinstance(r["exit_time_kst"], str) else (r["exit_time_kst"].strftime('%Y-%m-%dT%H:%M:%S') if hasattr(r["exit_time_kst"], 'strftime') else str(r["exit_time_kst"])),
+        "exit_time_cst": r["exit_time_cst"] if isinstance(r["exit_time_cst"], str) else (r["exit_time_cst"].strftime('%Y-%m-%dT%H:%M:%S') if hasattr(r["exit_time_cst"], 'strftime') else str(r["exit_time_cst"])),
+        "entry_price": r["entry_price"], "exit_price": r["exit_price"],
+        "quantity": r["quantity"], "profit": r["profit"],
+        "trade_type": r.get("trade_type", "매수"),
+        "symbol": r.get("symbol", "MNQ"),
+        "trade_date_cst": r.get("trade_date_cst") or str(entry_cst)[:10],
+        "trade_date_kst": r.get("trade_date_kst") or str(entry_kst)[:10],
+        "settlement_date": r.get("settlement_date") or get_settlement_date(entry_kst),
+    }
+
+def insert_paired_trades_batch_supabase(rows: List[dict], batch_size: int = 80) -> int:
+    """Supabase에 거래를 배치로 삽입 (가져오기 시 타임아웃 방지)."""
+    sb = _sb()
+    if not sb:
+        return 0
+    total = 0
+    for i in range(0, len(rows), batch_size):
+        chunk = rows[i : i + batch_size]
+        def _insert_chunk():
+            sb.table("paired_trades").insert(chunk).execute()
+            return len(chunk)
+        try:
+            n = _sb_retry(_insert_chunk)
+            total += n
+        except Exception:
+            for row in chunk:
+                try:
+                    _sb_retry(lambda r=row: sb.table("paired_trades").insert(r).execute())
+                    total += 1
+                except Exception:
+                    pass
+    return total
+
 def get_available_dates() -> List[str]:
     sb = _sb()
     if sb:
@@ -421,6 +462,7 @@ def import_from_sqlite(db_path: str) -> tuple:
     """
     Replit 등에서 받은 trades.db(SQLite) 내용을 현재 DB(Supabase 또는 SQLite)로 옮깁니다.
     거래 + 캔들 캐시를 모두 복사하므로, 옮긴 뒤 과거 날짜 차트도 그대로 나옵니다.
+    Supabase는 배치 삽입으로 전체가 들어가도록 함.
     반환: (넣은 거래 수, 넣은 캔들 수)
     """
     if not os.path.isfile(db_path):
@@ -435,23 +477,29 @@ def import_from_sqlite(db_path: str) -> tuple:
         cur.execute("""SELECT entry_time_kst, entry_time_cst, exit_time_kst, exit_time_cst,
             entry_price, exit_price, quantity, profit, trade_type, symbol, trade_date_cst, trade_date_kst, settlement_date
             FROM paired_trades""")
-        for row in cur.fetchall():
-            r = dict(row)
-            trade = {
-                "entry_time_kst": r["entry_time_kst"],
-                "entry_time_cst": r["entry_time_cst"],
-                "exit_time_kst": r["exit_time_kst"],
-                "exit_time_cst": r["exit_time_cst"],
-                "entry_price": r["entry_price"],
-                "exit_price": r["exit_price"],
-                "quantity": r["quantity"],
-                "profit": r["profit"],
-                "type": r["trade_type"],
-                "symbol": r["symbol"],
-                "trade_date": r.get("trade_date_cst") or r["entry_time_cst"][:10],
-            }
-            save_paired_trade(trade)
-            trades_done += 1
+        all_trades = cur.fetchall()
+        sb = _sb()
+        if sb:
+            rows = [_trade_row_from_sqlite(dict(row)) for row in all_trades]
+            trades_done = insert_paired_trades_batch_supabase(rows)
+        else:
+            for row in all_trades:
+                r = dict(row)
+                trade = {
+                    "entry_time_kst": r["entry_time_kst"],
+                    "entry_time_cst": r["entry_time_cst"],
+                    "exit_time_kst": r["exit_time_kst"],
+                    "exit_time_cst": r["exit_time_cst"],
+                    "entry_price": r["entry_price"],
+                    "exit_price": r["exit_price"],
+                    "quantity": r["quantity"],
+                    "profit": r["profit"],
+                    "type": r["trade_type"],
+                    "symbol": r["symbol"],
+                    "trade_date": r.get("trade_date_cst") or (r["entry_time_cst"][:10] if r["entry_time_cst"] else ""),
+                }
+                save_paired_trade(trade)
+                trades_done += 1
         # candle_cache: (trade_date, symbol, timeframe)별로 묶어서 save_candle_data
         cur.execute("""SELECT trade_date, symbol, timeframe, timestamp, open, high, low, close, volume FROM candle_cache ORDER BY trade_date, symbol, timeframe, timestamp""")
         rows = cur.fetchall()

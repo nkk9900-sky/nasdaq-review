@@ -7,8 +7,8 @@ import json
 
 DB_PATH = "trades.db"
 
-def _sb_retry(fn, max_attempts=3):
-    """Supabase HTTP 호출 시 [Errno 11] Resource temporarily unavailable 등 일시 오류 재시도."""
+def _sb_retry(fn, max_attempts=5):
+    """Supabase HTTP 호출 일시 오류 시 재시도 (ReadError/Errno 11 등)."""
     last = None
     for attempt in range(max_attempts):
         try:
@@ -17,11 +17,7 @@ def _sb_retry(fn, max_attempts=3):
             last = e
             if attempt >= max_attempts - 1:
                 raise
-            s = str(e).lower()
-            if "errno 11" in s or "temporarily unavailable" in s or "resource temporarily" in s or "readerror" in s:
-                time.sleep(1.0)
-                continue
-            raise
+            time.sleep(1.5)
     raise last
 
 # Supabase 사용 여부 (Streamlit Cloud 등에서 환경변수 설정 시)

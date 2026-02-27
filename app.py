@@ -546,8 +546,10 @@ if available_dates:
     st.sidebar.subheader("차트 데이터 저장")
     
     cache_key = f"{timeframe_period}m"
-    is_cached = db.has_cached_candles(selected_date, "NQ=F", cache_key)
-    
+    try:
+        is_cached = db.has_cached_candles(selected_date, "NQ=F", cache_key)
+    except Exception:
+        is_cached = False
     if is_cached:
         st.sidebar.success(f"✅ {selected_date} {timeframe} 자동저장됨")
     else:

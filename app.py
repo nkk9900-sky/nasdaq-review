@@ -452,7 +452,10 @@ with st.sidebar:
                     os.close(fd)
                     fd = None
                     with st.spinner("가져오는 중… (거래 519건 배치 업로드)" if skip_candles else "가져오는 중… (거래+캔들, 1~2분 걸릴 수 있음)"):
-                        trades_count, candles_count = db.import_from_sqlite(tmp_path, skip_candles=skip_candles)
+                        try:
+                            trades_count, candles_count = db.import_from_sqlite(tmp_path, skip_candles=skip_candles)
+                        except TypeError:
+                            trades_count, candles_count = db.import_from_sqlite(tmp_path)
                     st.success(f"가져오기 완료: 거래 {trades_count}건" + (f", 캔들 {candles_count}건" if candles_count else ""))
                     st.session_state.focused_idx = None
                     st.rerun()

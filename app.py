@@ -408,7 +408,9 @@ with st.sidebar:
         total_trades = len(db.get_all_paired_trades())
         st.info(f"저장된 거래: {total_trades}건 ({len(available_dates)}일)")
         # 배포 환경에서 데이터 유지 여부 확인용
-        if getattr(db, "USE_SUPABASE", False):
+        if getattr(db, "SUPABASE_INIT_ERROR", None):
+            st.warning(f"Supabase 연결 실패: {db.SUPABASE_INIT_ERROR[:80]}… — Secrets 확인 후 앱 재시작")
+        elif getattr(db, "USE_SUPABASE", False):
             st.caption("✅ 저장 위치: Supabase (재시작해도 유지)")
         else:
             st.caption("⚠️ 저장 위치: 로컬 DB (배포 앱 재시작 시 사라질 수 있음)")

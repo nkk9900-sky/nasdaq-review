@@ -9,17 +9,25 @@ DB_PATH = "trades.db"
 # Supabase 사용 여부 (Streamlit Cloud 등에서 환경변수 설정 시)
 USE_SUPABASE = bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"))
 _supabase = None
+SUPABASE_INIT_ERROR = None  # 연결 실패 시 메시지 저장
 
 def _sb():
-    global _supabase
+    global _supabase, SUPABASE_INIT_ERROR
     if not USE_SUPABASE:
         return None
+    if SUPABASE_INIT_ERROR is not None:
+        return None
     if _supabase is None:
-        from supabase import create_client
-        _supabase = create_client(
-            os.environ["SUPABASE_URL"].rstrip("/"),
-            os.environ["SUPABASE_KEY"].strip()
-        )
+        try:
+            from supabase import create_client
+            _supabase = create_client(
+                os.environ["SUPABASE_URL"].rstrip("/"),
+                os.environ["SUPABASE_KEY"].strip()
+            )
+        except Exception as e:
+            SUPABASE_INIT_ERROR = str(e)
+            _supabase = None
+            return None
     return _supabase
 
 def get_settlement_date(kst_datetime) -> str:
@@ -38,12 +46,14 @@ def get_settlement_date(kst_datetime) -> str:
     return settlement.strftime('%Y-%m-%d')
 
 def get_connection():
+    if USE_SUPABASE and SUPABASE_INIT_ERROR is not None:
+        init_db()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 def init_db():
-    if USE_SUPABASE:
+    if USE_SUPABASE and SUPABASE_INIT_ERROR is None:
         return
     conn = get_connection()
     cursor = conn.cursor()

@@ -46,14 +46,12 @@ def get_settlement_date(kst_datetime) -> str:
     return settlement.strftime('%Y-%m-%d')
 
 def get_connection():
-    if USE_SUPABASE and SUPABASE_INIT_ERROR is not None:
-        init_db()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 def init_db():
-    if USE_SUPABASE and SUPABASE_INIT_ERROR is None:
+    if USE_SUPABASE:
         return
     conn = get_connection()
     cursor = conn.cursor()
@@ -147,6 +145,8 @@ def save_paired_trade(trade: Dict) -> int:
         r = sb.table("paired_trades").insert(row).execute()
         return r.data[0]["id"] if r.data else 0
 
+    if USE_SUPABASE:
+        return 0
     conn = get_connection()
     cursor = conn.cursor()
     entry_cst = trade['entry_time_cst']
@@ -194,6 +194,8 @@ def get_available_dates() -> List[str]:
         dates = list({row["settlement_date"] for row in (r.data or [])})
         dates.sort(reverse=True)
         return dates
+    if USE_SUPABASE:
+        return []
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""SELECT DISTINCT settlement_date as trade_date FROM paired_trades WHERE settlement_date IS NOT NULL ORDER BY trade_date DESC""")
@@ -224,6 +226,8 @@ def get_paired_trades_by_date(trade_date: str, symbol: Optional[str] = None) -> 
             q = q.eq("symbol", symbol)
         r = q.execute()
         return [_row_to_trade(row) for row in (r.data or [])]
+    if USE_SUPABASE:
+        return []
     conn = get_connection()
     cursor = conn.cursor()
     if symbol:
@@ -239,6 +243,8 @@ def get_all_paired_trades() -> List[Dict]:
     if sb:
         r = sb.table("paired_trades").select("*").order("entry_time_cst", desc=True).execute()
         return [_row_to_trade(row) for row in (r.data or [])]
+    if USE_SUPABASE:
+        return []
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM paired_trades ORDER BY entry_time_cst DESC")
@@ -251,6 +257,8 @@ def clear_paired_trades_by_date(trade_date: str):
     if sb:
         sb.table("paired_trades").delete().eq("settlement_date", trade_date).execute()
         return
+    if USE_SUPABASE:
+        return
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM paired_trades WHERE settlement_date = ?", (trade_date,))
@@ -261,6 +269,8 @@ def clear_all_paired_trades():
     sb = _sb()
     if sb:
         sb.table("paired_trades").delete().gte("id", 0).execute()
+        return
+    if USE_SUPABASE:
         return
     conn = get_connection()
     cursor = conn.cursor()
@@ -285,6 +295,8 @@ def check_date_exists(trade_date: str) -> bool:
     if sb:
         r = sb.table("paired_trades").select("id").eq("trade_date_cst", trade_date).limit(1).execute()
         return len(r.data or []) > 0
+    if USE_SUPABASE:
+        return False
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) as cnt FROM paired_trades WHERE trade_date_cst = ?", (trade_date,))
@@ -294,6 +306,8 @@ def check_date_exists(trade_date: str) -> bool:
 
 def save_candle_data(trade_date: str, symbol: str, timeframe: str, candles: List[Dict]) -> int:
     sb = _sb()
+    if USE_SUPABASE and sb is None:
+        return 0
     if sb:
         rows = []
         for c in candles:
@@ -335,6 +349,8 @@ def get_cached_candles(trade_date: str, symbol: str, timeframe: str) -> List[Dic
     if sb:
         r = sb.table("candle_cache").select("timestamp,open,high,low,close,volume").eq("trade_date", trade_date).eq("symbol", symbol).eq("timeframe", timeframe).order("timestamp").execute()
         return [{"timestamp": row["timestamp"], "open": row["open"], "high": row["high"], "low": row["low"], "close": row["close"], "volume": row.get("volume", 0)} for row in (r.data or [])]
+    if USE_SUPABASE:
+        return []
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""SELECT timestamp, open, high, low, close, volume FROM candle_cache WHERE trade_date = ? AND symbol = ? AND timeframe = ? ORDER BY timestamp""", (trade_date, symbol, timeframe))
@@ -347,6 +363,8 @@ def has_cached_candles(trade_date: str, symbol: str, timeframe: str) -> bool:
     if sb:
         r = sb.table("candle_cache").select("id").eq("trade_date", trade_date).eq("symbol", symbol).eq("timeframe", timeframe).limit(1).execute()
         return len(r.data or []) > 0
+    if USE_SUPABASE:
+        return False
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""SELECT COUNT(*) as cnt FROM candle_cache WHERE trade_date = ? AND symbol = ? AND timeframe = ?""", (trade_date, symbol, timeframe))
@@ -361,6 +379,8 @@ def clear_candle_cache(trade_date: str = None):
             sb.table("candle_cache").delete().eq("trade_date", trade_date).execute()
         else:
             sb.table("candle_cache").delete().gte("id", 0).execute()
+        return
+    if USE_SUPABASE:
         return
     conn = get_connection()
     cursor = conn.cursor()

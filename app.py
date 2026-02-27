@@ -385,6 +385,19 @@ def save_candles_to_cache(df, trade_date, symbol, timeframe):
 st.title("나스닥 선물 복기 대시보드")
 
 with st.sidebar:
+    # DB 연결 상태 먼저 표시 (배포 시 연결 여부 바로 확인)
+    st.subheader("DB 연결 상태")
+    db._sb()  # 한 번 호출해서 연결 시도
+    if getattr(db, "USE_SUPABASE", False):
+        if getattr(db, "SUPABASE_INIT_ERROR", None):
+            st.error("Supabase 연결 실패")
+            st.caption(db.SUPABASE_INIT_ERROR[:120] + ("…" if len(db.SUPABASE_INIT_ERROR) > 120 else ""))
+            st.caption("→ Streamlit Cloud: Settings → Secrets 에 SUPABASE_URL, SUPABASE_KEY 확인 후 앱 재시작")
+        else:
+            st.success("Supabase 연결됨 (데이터 유지)")
+    else:
+        st.info("로컬 DB (SQLite) — 배포 앱에서는 재시작 시 데이터 사라질 수 있음")
+    st.divider()
     st.header("파일 업로드")
     
     exec_file = st.file_uploader("체결내역 파일", type=['xlsx', 'xls'], key="exec")
@@ -421,13 +434,6 @@ with st.sidebar:
         except Exception:
             total_trades = 0
         st.info(f"저장된 거래: {total_trades}건 ({len(available_dates)}일)")
-        # 배포 환경에서 데이터 유지 여부 확인용
-        if getattr(db, "SUPABASE_INIT_ERROR", None):
-            st.warning(f"Supabase 연결 실패: {db.SUPABASE_INIT_ERROR[:80]}… — Secrets 확인 후 앱 재시작")
-        elif getattr(db, "USE_SUPABASE", False):
-            st.caption("✅ 저장 위치: Supabase (재시작해도 유지)")
-        else:
-            st.caption("⚠️ 저장 위치: 로컬 DB (배포 앱 재시작 시 사라질 수 있음)")
         if st.button("전체 데이터 초기화"):
             db.clear_all_paired_trades()
             st.session_state.focused_idx = None

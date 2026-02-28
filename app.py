@@ -879,7 +879,7 @@ if available_dates:
         
             x_range = [chart_range_start, chart_range_end]
         
-            cst_times = pd.date_range(start=x_range[0], end=x_range[1], freq='1h')
+            cst_times = pd.date_range(start=x_range[0], end=x_range[1], freq='15min')
             kst_labels = [(t + timedelta(hours=int(15))).strftime('%H:%M') for t in cst_times]
             tick_text = [f"{t.strftime('%H:%M')}<br><span style='color:#888;font-size:10px'>KST {kst}</span>" for t, kst in zip(cst_times, kst_labels)]
         
@@ -911,7 +911,9 @@ if available_dates:
                 tickvals=cst_times,
                 ticktext=tick_text,
                 tickangle=0,
-                rangeslider_visible=False
+                rangeslider_visible=False,
+                showticklabels=True,
+                row=1, col=1
             )
         
             fig.update_yaxes(
@@ -937,7 +939,8 @@ if available_dates:
                 fig.update_xaxes(
                     range=x_range,
                     autorange=False,
-                    row=2, col=1
+                    tickmode='array', tickvals=cst_times, ticktext=tick_text,
+                    showticklabels=True, row=2, col=1
                 )
         
             if show_dmi:
@@ -954,7 +957,8 @@ if available_dates:
                 fig.update_xaxes(
                     range=x_range,
                     autorange=False,
-                    row=dmi_row, col=1
+                    tickmode='array', tickvals=cst_times, ticktext=tick_text,
+                    showticklabels=True, row=dmi_row, col=1
                 )
         
             st.plotly_chart(fig, width='stretch', config={'scrollZoom': True, 'displayModeBar': True})

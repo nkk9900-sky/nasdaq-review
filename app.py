@@ -527,7 +527,7 @@ if available_dates:
     chart_type = st.sidebar.radio("차트 유형", ["캔들 차트", "틱 차트"], horizontal=True)
     
     st.sidebar.caption("타임프레임")
-    timeframe = st.sidebar.radio("타임프레임", ["1분", "3분", "5분", "15분"], index=1, horizontal=True, label_visibility="collapsed")
+    timeframe = st.sidebar.radio("타임프레임", ["1분", "3분", "5분", "15분"], index=0, horizontal=True, label_visibility="collapsed")
     
     st.sidebar.caption("데이터 소스")
     data_source = st.sidebar.radio("데이터 소스", ["Yahoo Finance", "한국투자증권"], horizontal=True, label_visibility="collapsed")

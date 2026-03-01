@@ -1101,7 +1101,7 @@ if available_dates:
     if classifications:
         st.divider()
         st.subheader("매매 상세 복기")
-        st.caption("체크박스 선택 시 차트에서 해당 매매가 황금색으로 강조됩니다 (3분봉 기준 원칙 판정)")
+        st.caption("체크박스 선택 시 차트에서 해당 매매가 황금색으로 강조됩니다 (5선=1분봉, 33선·MACD·DMI=3분봉 기준 원칙 판정)")
         
         classification_colors = {
             '원칙': '#00C853',

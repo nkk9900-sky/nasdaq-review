@@ -3,7 +3,7 @@ import numpy as np
 from datetime import datetime, timedelta
 
 
-def classify_trade(trade, df_chart, macd_fast=7, macd_slow=20, macd_signal_period=6, dmi_period=14):
+def classify_trade(trade, df_chart, macd_fast=7, macd_slow=20, macd_signal_period=6, dmi_period=14, df_chart_1min=None):
     criteria = {
         'ma33': False,
         'ma5': False,
@@ -86,12 +86,31 @@ def classify_trade(trade, df_chart, macd_fast=7, macd_slow=20, macd_signal_perio
         else:
             messages['ma33'] = '데이터 부족'
 
-        if ma5_at_entry is not None and idx_pos >= 3:
-            lookback = min(3, idx_pos)
+        # 5선 안착: 1분봉 기준 (df_chart_1min 있으면), 없으면 기존 df_chart(3분봉) 기준
+        df_5 = df_chart_1min if (df_chart_1min is not None and not df_chart_1min.empty) else df_work
+        chart_index_5 = df_5.index
+        if hasattr(chart_index_5, 'tz') and chart_index_5.tz is not None:
+            chart_index_5_naive = chart_index_5.tz_localize(None)
+        else:
+            chart_index_5_naive = chart_index_5
+        df_5_work = df_5.copy()
+        df_5_work.index = chart_index_5_naive
+        idx_pos_5 = df_5_work.index.searchsorted(entry_time_naive, side='right') - 1
+        if idx_pos_5 < 0:
+            idx_pos_5 = 0
+        if idx_pos_5 >= len(df_5_work):
+            idx_pos_5 = len(df_5_work) - 1
+        close_series_5 = df_5_work['Close']
+        ma5_series = close_series_5.rolling(window=5).mean()
+        ma5_at_entry = ma5_series.iloc[idx_pos_5] if idx_pos_5 < len(ma5_series) and pd.notna(ma5_series.iloc[idx_pos_5]) else None
+        close_at_entry_5 = close_series_5.iloc[idx_pos_5]
+
+        if ma5_at_entry is not None and idx_pos_5 >= 3:
+            lookback = min(3, idx_pos_5)
             had_cross = False
             for b in range(1, lookback + 1):
-                prev_c = close_series.iloc[idx_pos - b] if pd.notna(close_series.iloc[idx_pos - b]) else None
-                prev_m = ma5.iloc[idx_pos - b] if pd.notna(ma5.iloc[idx_pos - b]) else None
+                prev_c = close_series_5.iloc[idx_pos_5 - b] if pd.notna(close_series_5.iloc[idx_pos_5 - b]) else None
+                prev_m = ma5_series.iloc[idx_pos_5 - b] if pd.notna(ma5_series.iloc[idx_pos_5 - b]) else None
                 if prev_c is not None and prev_m is not None:
                     if is_buy and prev_c <= prev_m:
                         had_cross = True
@@ -101,25 +120,25 @@ def classify_trade(trade, df_chart, macd_fast=7, macd_slow=20, macd_signal_perio
                         break
 
             if is_buy:
-                if close_at_entry > ma5_at_entry:
+                if close_at_entry_5 > ma5_at_entry:
                     if had_cross:
                         criteria['ma5'] = True
-                        messages['ma5'] = f'5선 상향돌파 안착({close_at_entry:.1f}>{ma5_at_entry:.1f})'
+                        messages['ma5'] = f'5선 상향돌파 안착({close_at_entry_5:.1f}>{ma5_at_entry:.1f}) [1분봉]'
                     else:
                         criteria['ma5'] = True
-                        messages['ma5'] = f'5선 위 안착({close_at_entry:.1f}>{ma5_at_entry:.1f})'
+                        messages['ma5'] = f'5선 위 안착({close_at_entry_5:.1f}>{ma5_at_entry:.1f}) [1분봉]'
                 else:
-                    messages['ma5'] = f'5선 하락({close_at_entry:.1f}<{ma5_at_entry:.1f})'
+                    messages['ma5'] = f'5선 하락({close_at_entry_5:.1f}<{ma5_at_entry:.1f}) [1분봉]'
             elif is_sell:
-                if close_at_entry < ma5_at_entry:
+                if close_at_entry_5 < ma5_at_entry:
                     if had_cross:
                         criteria['ma5'] = True
-                        messages['ma5'] = f'5선 하향돌파 안착({close_at_entry:.1f}<{ma5_at_entry:.1f})'
+                        messages['ma5'] = f'5선 하향돌파 안착({close_at_entry_5:.1f}<{ma5_at_entry:.1f}) [1분봉]'
                     else:
                         criteria['ma5'] = True
-                        messages['ma5'] = f'5선 아래 안착({close_at_entry:.1f}<{ma5_at_entry:.1f})'
+                        messages['ma5'] = f'5선 아래 안착({close_at_entry_5:.1f}<{ma5_at_entry:.1f}) [1분봉]'
                 else:
-                    messages['ma5'] = f'5선 상승({close_at_entry:.1f}>{ma5_at_entry:.1f})'
+                    messages['ma5'] = f'5선 상승({close_at_entry_5:.1f}>{ma5_at_entry:.1f}) [1분봉]'
         else:
             messages['ma5'] = '데이터 부족'
 
@@ -292,6 +311,8 @@ def classify_trade(trade, df_chart, macd_fast=7, macd_slow=20, macd_signal_perio
 
 
 def classify_all_trades(trades, df_chart, macd_fast=7, macd_slow=20, macd_signal_period=6, dmi_period=14):
+    # 33선·MACD·DMI: 3분봉 기준 / 5선 안착: 1분봉 기준
+    df_1min = df_chart if (df_chart is not None and not df_chart.empty) else None
     df_3min = None
     if df_chart is not None and not df_chart.empty:
         df_3min = df_chart.resample('3min').agg({
@@ -305,7 +326,7 @@ def classify_all_trades(trades, df_chart, macd_fast=7, macd_slow=20, macd_signal
     results = []
     for trade in trades:
         criteria, score, classification, messages = classify_trade(
-            trade, df_3min, macd_fast, macd_slow, macd_signal_period, dmi_period
+            trade, df_3min, macd_fast, macd_slow, macd_signal_period, dmi_period, df_chart_1min=df_1min
         )
         results.append({
             'criteria': criteria,

@@ -874,10 +874,18 @@ if available_dates:
                     text='',
                 )
         
-            chart_range_start = chart_start.replace(tzinfo=None)
-            chart_range_end = chart_end.replace(tzinfo=None)
-        
-            x_range = [chart_range_start, chart_range_end]
+            # x축: 실제 데이터 범위 사용 (Yahoo가 일부만 줄 때 왼쪽이 비는 현상 방지, Streamlit Cloud 등)
+            if df_chart_data is not None and not df_chart_data.empty:
+                data_min = df_chart_data.index.min()
+                data_max = df_chart_data.index.max()
+                if hasattr(data_min, 'tzinfo') and data_min.tzinfo is not None:
+                    data_min = data_min.replace(tzinfo=None)
+                    data_max = data_max.replace(tzinfo=None)
+                x_range = [data_min, data_max]
+            else:
+                chart_range_start = chart_start.replace(tzinfo=None)
+                chart_range_end = chart_end.replace(tzinfo=None)
+                x_range = [chart_range_start, chart_range_end]
         
             cst_times = pd.date_range(start=x_range[0], end=x_range[1], freq='15min')
             kst_labels = [(t + timedelta(hours=int(15))).strftime('%H:%M') for t in cst_times]

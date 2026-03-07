@@ -568,8 +568,10 @@ if available_dates:
     else:
         st.sidebar.info(f"🔄 {selected_date} {timeframe} 조회 시 자동저장")
     
-    if st.sidebar.button("🔄 캐시 초기화", help="저장된 데이터 삭제 후 새로 가져오기"):
+    st.sidebar.caption("차트가 일부만 보이면: 아래 버튼으로 이 날짜 캔들 캐시를 지운 뒤 다시 조회하세요.")
+    if st.sidebar.button("🔄 차트(캔들) 캐시 초기화 — 이 날짜만", key="clear_candle_btn", help="선택한 날짜의 차트 데이터만 삭제. 다음 조회 시 Yahoo에서 다시 받습니다."):
         db.clear_candle_cache(selected_date)
+        st.sidebar.success(f"{selected_date} 차트 캐시 삭제됨. 새로고침 후 다시 조회하세요.")
         st.rerun()
     
     try:

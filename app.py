@@ -916,7 +916,8 @@ if available_dates:
                 hovermode='x',
                 spikedistance=1000,
                 hoverdistance=100,
-                hoverlabel=dict(bgcolor='rgba(0,0,0,0)', font_size=1, namelength=0)
+                hoverlabel=dict(bgcolor='rgba(0,0,0,0)', font_size=1, namelength=0),
+                margin=dict(l=60, r=80, t=60, b=50)
             )
         
             fig.update_xaxes(

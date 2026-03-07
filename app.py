@@ -346,13 +346,14 @@ def get_candle_data(date_str, symbol="NQ=F", data_source="yahoo", timeframe="1",
             elif not df.empty:
                 df.index = df.index.tz_localize('UTC').tz_convert(cst)
             
+            # NQ 세션: 전일 17:00 CST ~ 당일 16:00 CST. 캐시/반환은 이 구간만 사용 (날짜 기준 자르면 세션 앞부분이 빠짐 → 차트 왼쪽 빈 칸 원인)
             if not df.empty:
-                target_date = date_obj.date()
-                df_target = df[df.index.date == target_date]
-                if not df_target.empty:
-                    save_candles_to_cache(df_target, date_str, symbol, cache_key)
-            
-            return df
+                session_start = cst.localize(datetime.combine(date_obj.date() - timedelta(days=1), datetime.strptime("17:00", "%H:%M").time()))
+                session_end = cst.localize(datetime.combine(date_obj.date(), datetime.strptime("16:00", "%H:%M").time()))
+                df_session = df[(df.index >= session_start) & (df.index <= session_end)]
+                if not df_session.empty:
+                    save_candles_to_cache(df_session, date_str, symbol, cache_key)
+                return df_session if not df_session.empty else df
         
         return pd.DataFrame()
     except Exception as e:
@@ -874,10 +875,15 @@ if available_dates:
                     text='',
                 )
         
-            # x축: 실제 데이터 범위 사용 (Yahoo가 일부만 줄 때 왼쪽이 비는 현상 방지, Streamlit Cloud 등)
+            # x축: 유효한 캔들만 있는 구간으로 (인덱스만 있고 OHLC NaN인 구간 제외 → 왼쪽 빈 칸 방지)
             if df_chart_data is not None and not df_chart_data.empty:
-                data_min = df_chart_data.index.min()
-                data_max = df_chart_data.index.max()
+                valid = df_chart_data.dropna(subset=['Open', 'Close'], how='all')
+                if not valid.empty:
+                    data_min = valid.index.min()
+                    data_max = valid.index.max()
+                else:
+                    data_min = df_chart_data.index.min()
+                    data_max = df_chart_data.index.max()
                 if hasattr(data_min, 'tzinfo') and data_min.tzinfo is not None:
                     data_min = data_min.replace(tzinfo=None)
                     data_max = data_max.replace(tzinfo=None)

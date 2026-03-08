@@ -13,6 +13,7 @@ try:
     import tempfile
     import os
     from io import BytesIO
+    from concurrent.futures import ThreadPoolExecutor
     import database as db
     import kis_api
     import trade_classifier
@@ -66,6 +67,11 @@ if 'focused_idx' not in st.session_state:
     st.session_state.focused_idx = None
 if 'selected_date' not in st.session_state:
     st.session_state.selected_date = None
+if 'trades_cache' not in st.session_state:
+    st.session_state.trades_cache = {}
+if 'candle_cache' not in st.session_state:
+    st.session_state.candle_cache = {}
+_MAX_CACHE_DATES = 12
 
 def parse_execution_file(file_path):
     df = pd.read_excel(file_path, header=1)
@@ -552,18 +558,53 @@ if available_dates:
     st.sidebar.caption("차트가 일부만 보이면: 아래 버튼으로 이 날짜 캔들 캐시를 지운 뒤 다시 조회하세요.")
     if st.sidebar.button("🔄 차트(캔들) 캐시 초기화 — 이 날짜만", key="clear_candle_btn", help="선택한 날짜의 차트 데이터만 삭제. 다음 조회 시 Yahoo에서 다시 받습니다."):
         db.clear_candle_cache(selected_date)
+        for k in list(st.session_state.candle_cache.keys()):
+            if k[0] == selected_date:
+                del st.session_state.candle_cache[k]
         st.sidebar.success(f"{selected_date} 차트 캐시 삭제됨. 새로고침 후 다시 조회하세요.")
         st.rerun()
 
+    trade_date = selected_date
+    ck = (trade_date, timeframe_period)
     try:
-        all_day_trades = load_trades_by_date(selected_date)
-        df = get_candle_data(selected_date, "NQ=F", data_source_key, timeframe_period)
+        if trade_date in st.session_state.trades_cache and ck in st.session_state.candle_cache:
+            all_day_trades = st.session_state.trades_cache[trade_date]
+            df = st.session_state.candle_cache[ck]
+        elif trade_date not in st.session_state.trades_cache and ck not in st.session_state.candle_cache:
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                ft = ex.submit(load_trades_by_date, trade_date)
+                fc = ex.submit(get_candle_data, trade_date, "NQ=F", data_source_key, timeframe_period)
+                all_day_trades = ft.result()
+                df = fc.result()
+            if all_day_trades:
+                st.session_state.trades_cache[trade_date] = all_day_trades
+                if len(st.session_state.trades_cache) > _MAX_CACHE_DATES:
+                    del st.session_state.trades_cache[next(iter(st.session_state.trades_cache))]
+            if not df.empty:
+                st.session_state.candle_cache[ck] = df
+                if len(st.session_state.candle_cache) > _MAX_CACHE_DATES:
+                    del st.session_state.candle_cache[next(iter(st.session_state.candle_cache))]
+        else:
+            if trade_date not in st.session_state.trades_cache:
+                all_day_trades = load_trades_by_date(trade_date)
+                st.session_state.trades_cache[trade_date] = all_day_trades
+                if len(st.session_state.trades_cache) > _MAX_CACHE_DATES:
+                    del st.session_state.trades_cache[next(iter(st.session_state.trades_cache))]
+            else:
+                all_day_trades = st.session_state.trades_cache[trade_date]
+            if ck not in st.session_state.candle_cache:
+                df = get_candle_data(trade_date, "NQ=F", data_source_key, timeframe_period)
+                if not df.empty:
+                    st.session_state.candle_cache[ck] = df
+                    if len(st.session_state.candle_cache) > _MAX_CACHE_DATES:
+                        del st.session_state.candle_cache[next(iter(st.session_state.candle_cache))]
+            else:
+                df = st.session_state.candle_cache[ck]
     except Exception as e:
         st.error("DB 연결이 일시적으로 불안정합니다. 잠시 후 **새로고침** 해 주세요.")
         st.caption(str(e))
         st.stop()
     
-    trade_date = selected_date
     selected_symbol = "NQ=F"
     
     if not all_day_trades:

@@ -48,3 +48,9 @@ ALTER TABLE candle_cache ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow all for paired_trades" ON paired_trades FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all for candle_cache" ON candle_cache FOR ALL USING (true) WITH CHECK (true);
+
+-- 날짜 목록 한 번에 조회 (앱에서 1000행 제한 없이 사용). SQL Editor에서 한 번 실행 후 앱 새로고침.
+CREATE OR REPLACE FUNCTION get_settlement_dates()
+RETURNS TABLE(settlement_date text) AS $$
+  SELECT DISTINCT paired_trades.settlement_date FROM paired_trades WHERE paired_trades.settlement_date IS NOT NULL ORDER BY 1 DESC;
+$$ LANGUAGE sql SECURITY DEFINER;

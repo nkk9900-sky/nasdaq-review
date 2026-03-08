@@ -247,14 +247,15 @@ def insert_paired_trades_batch_supabase(rows: List[dict], batch_size: int = 40) 
     return total
 
 def get_available_dates() -> List[str]:
+    """저장된 거래의 정산일 목록 (최신순). 로컬 1000건 미만 기준 단순 조회."""
     sb = _sb()
     if sb:
         def _fetch():
             r = sb.table("paired_trades").select("settlement_date").not_.is_("settlement_date", "null").execute()
-            return list({row["settlement_date"] for row in (r.data or [])})
-        dates = _sb_retry(_fetch)
-        dates.sort(reverse=True)
-        return dates
+            dates = list({row["settlement_date"] for row in (r.data or []) if row.get("settlement_date")})
+            dates.sort(reverse=True)
+            return dates
+        return _sb_retry(_fetch)
     if USE_SUPABASE:
         return []
     conn = get_connection()

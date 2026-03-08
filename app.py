@@ -293,17 +293,11 @@ def get_candle_data(date_str, symbol="NQ=F", data_source="yahoo", timeframe="1",
         
         cache_key = f"{timeframe}m"
         
+        # 캐시는 요청한 날짜 1일만 조회 (8일치 조회 시 Supabase 호출 많아져 느려짐)
         if not force_refresh and db.has_cached_candles(date_str, symbol, cache_key):
-            all_cached = []
-            for day_offset in range(7, -1, -1):
-                prev_date = (date_obj - timedelta(days=day_offset)).strftime("%Y-%m-%d")
-                if db.has_cached_candles(prev_date, symbol, cache_key):
-                    cached = db.get_cached_candles(prev_date, symbol, cache_key)
-                    if cached:
-                        all_cached.extend(cached)
-            
-            if all_cached:
-                df = pd.DataFrame(all_cached)
+            cached = db.get_cached_candles(date_str, symbol, cache_key)
+            if cached:
+                df = pd.DataFrame(cached)
                 df['timestamp'] = pd.to_datetime(df['timestamp'])
                 df.set_index('timestamp', inplace=True)
                 df = df[~df.index.duplicated(keep='first')]
@@ -382,6 +376,13 @@ def save_candles_to_cache(df, trade_date, symbol, timeframe):
 
 st.title("나스닥 선물 복기 대시보드")
 
+try:
+    available_dates = db.get_available_dates()
+    _total_trades = len(db.get_all_paired_trades())
+except Exception:
+    available_dates = []
+    _total_trades = 0
+
 with st.sidebar:
     try:
         st.subheader("DB 연결 상태")
@@ -423,19 +424,9 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"오류: {e}")
     
-    try:
-        available_dates = db.get_available_dates()
-    except Exception as e:
-        st.sidebar.error("DB 조회 오류 (아래 내용 복사해서 알려주세요)")
-        st.sidebar.code(traceback.format_exc())
-        available_dates = []
     if available_dates:
         st.divider()
-        try:
-            total_trades = len(db.get_all_paired_trades())
-        except Exception:
-            total_trades = 0
-        st.info(f"저장된 거래: {total_trades}건 ({len(available_dates)}일)")
+        st.info(f"저장된 거래: {_total_trades}건 ({len(available_dates)}일)")
         if st.button("전체 데이터 초기화"):
             db.clear_all_paired_trades()
             st.session_state.focused_idx = None
@@ -474,17 +465,9 @@ with st.sidebar:
                     except Exception:
                         pass
 
-try:
-    available_dates = db.get_available_dates()
-except Exception as e:
-    st.error("DB 조회 오류 (아래 내용 복사해서 알려주세요)")
-    st.code(traceback.format_exc())
-    available_dates = []
-
 if available_dates:
     st.sidebar.divider()
     st.sidebar.subheader("날짜 선택")
-    
     date_option = st.sidebar.radio("조회 방식", ["저장된 날짜", "날짜 검색"], horizontal=True)
     
     if date_option == "저장된 날짜":
@@ -557,7 +540,6 @@ if available_dates:
     
     st.sidebar.divider()
     st.sidebar.subheader("차트 데이터 저장")
-    
     cache_key = f"{timeframe_period}m"
     try:
         is_cached = db.has_cached_candles(selected_date, "NQ=F", cache_key)
@@ -567,19 +549,22 @@ if available_dates:
         st.sidebar.success(f"✅ {selected_date} {timeframe} 자동저장됨")
     else:
         st.sidebar.info(f"🔄 {selected_date} {timeframe} 조회 시 자동저장")
-    
     st.sidebar.caption("차트가 일부만 보이면: 아래 버튼으로 이 날짜 캔들 캐시를 지운 뒤 다시 조회하세요.")
     if st.sidebar.button("🔄 차트(캔들) 캐시 초기화 — 이 날짜만", key="clear_candle_btn", help="선택한 날짜의 차트 데이터만 삭제. 다음 조회 시 Yahoo에서 다시 받습니다."):
         db.clear_candle_cache(selected_date)
         st.sidebar.success(f"{selected_date} 차트 캐시 삭제됨. 새로고침 후 다시 조회하세요.")
         st.rerun()
-    
+
     try:
         all_day_trades = load_trades_by_date(selected_date)
+        df = get_candle_data(selected_date, "NQ=F", data_source_key, timeframe_period)
     except Exception as e:
         st.error("DB 연결이 일시적으로 불안정합니다. 잠시 후 **새로고침** 해 주세요.")
         st.caption(str(e))
         st.stop()
+    
+    trade_date = selected_date
+    selected_symbol = "NQ=F"
     
     if not all_day_trades:
         st.warning(f"{selected_date}에 해당하는 거래가 없습니다.")
@@ -588,15 +573,9 @@ if available_dates:
     
     first_entry_all = min(t['entry_time_cst'] for t in all_day_trades)
     last_exit_all = max(t['exit_time_cst'] for t in all_day_trades)
-    trade_date = selected_date
-    
     trades = all_day_trades
-    selected_symbol = "NQ=F"
-    
     first_entry = min(t['entry_time_cst'] for t in trades)
     last_exit = max(t['exit_time_cst'] for t in trades)
-    
-    df = get_candle_data(trade_date, selected_symbol, data_source_key, timeframe_period)
     
     df_chart_data = None
     classifications = None
@@ -1014,7 +993,6 @@ if available_dates:
         
         selection = st.dataframe(
             trade_df,
-            width='stretch',
             height=list_height,
             hide_index=True,
             on_select="rerun",

@@ -415,8 +415,20 @@ def get_cached_candles(trade_date: str, symbol: str, timeframe: str) -> List[Dic
     sb = _sb()
     if sb:
         def _fetch():
-            r = sb.table("candle_cache").select("timestamp,open,high,low,close,volume").eq("trade_date", trade_date).eq("symbol", symbol).eq("timeframe", timeframe).order("timestamp").execute()
-            return [{"timestamp": row["timestamp"], "open": row["open"], "high": row["high"], "low": row["low"], "close": row["close"], "volume": row.get("volume", 0)} for row in (r.data or [])]
+            # Supabase(PostgREST) 기본 1000행 제한 → 1분봉 하루치(~1380행) 뒷부분 잘림 방지. 페이지네이션으로 전부 가져옴.
+            all_rows = []
+            chunk = 1000
+            offset = 0
+            while True:
+                r = sb.table("candle_cache").select("timestamp,open,high,low,close,volume").eq("trade_date", trade_date).eq("symbol", symbol).eq("timeframe", timeframe).order("timestamp").range(offset, offset + chunk - 1).execute()
+                data = r.data or []
+                if not data:
+                    break
+                all_rows.extend([{"timestamp": row["timestamp"], "open": row["open"], "high": row["high"], "low": row["low"], "close": row["close"], "volume": row.get("volume", 0)} for row in data])
+                if len(data) < chunk:
+                    break
+                offset += chunk
+            return all_rows
         return _sb_retry(_fetch)
     if USE_SUPABASE:
         return []

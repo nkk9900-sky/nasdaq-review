@@ -872,9 +872,12 @@ if available_dates:
                         exit_cst = cst.localize(exit_cst)
                 except:
                     pass
+                # Plotly에서 캔들 X축과 동일한 타입으로 맞춤 (1시간 어긋남 방지)
+                entry_ts = pd.Timestamp(entry_cst) if not isinstance(entry_cst, pd.Timestamp) else entry_cst
+                exit_ts = pd.Timestamp(exit_cst) if not isinstance(exit_cst, pd.Timestamp) else exit_cst
             
                 fig.add_trace(go.Scatter(
-                    x=[entry_cst, exit_cst],
+                    x=[entry_ts, exit_ts],
                     y=[entry_price, exit_price],
                     mode='markers+text',
                     marker=dict(size=8, symbol='circle', color=color),
@@ -890,8 +893,8 @@ if available_dates:
                     max_price = max(entry_price, exit_price) + 2
                     shape_kwargs = dict(
                         type="rect",
-                        x0=entry_cst - timedelta(seconds=30),
-                        x1=exit_cst + timedelta(seconds=30),
+                        x0=entry_ts - timedelta(seconds=30),
+                        x1=exit_ts + timedelta(seconds=30),
                         y0=min_price,
                         y1=max_price,
                         line=dict(color="#FFD700", width=3),
@@ -903,9 +906,9 @@ if available_dates:
                     fig.add_shape(**shape_kwargs)
             
                 fig.add_annotation(
-                    x=exit_cst,
+                    x=exit_ts,
                     y=exit_price,
-                    ax=entry_cst,
+                    ax=entry_ts,
                     ay=entry_price,
                     xref='x',
                     yref='y',
@@ -919,7 +922,7 @@ if available_dates:
                     text='',
                 )
         
-            # x축: 유효한 캔들만 있는 구간으로 (인덱스만 있고 OHLC NaN인 구간 제외 → 왼쪽 빈 칸 방지)
+            # x축: 유효한 캔들만 있는 구간. Plotly에서 1시간 어긋남 방지를 위해 range/tickvals는 캔들·화살표와 동일하게 timezone-aware CST 유지.
             if df_chart_data is not None and not df_chart_data.empty:
                 valid = df_chart_data.dropna(subset=['Open', 'Close'], how='all')
                 if not valid.empty:
@@ -928,17 +931,15 @@ if available_dates:
                 else:
                     data_min = df_chart_data.index.min()
                     data_max = df_chart_data.index.max()
-                if hasattr(data_min, 'tzinfo') and data_min.tzinfo is not None:
-                    data_min = data_min.replace(tzinfo=None)
-                    data_max = data_max.replace(tzinfo=None)
                 x_range = [data_min, data_max]
             else:
-                chart_range_start = chart_start.replace(tzinfo=None)
-                chart_range_end = chart_end.replace(tzinfo=None)
-                x_range = [chart_range_start, chart_range_end]
+                x_range = [chart_start, chart_end]
         
+            # tickvals를 캔들 인덱스와 동일한 타임존(CST)으로 생성 (naive로 바꾸면 브라우저가 로컬(KST)로 해석해 어긋남)
             cst_times = pd.date_range(start=x_range[0], end=x_range[1], freq='15min')
-            kst_labels = [cst_to_kst(t).strftime('%H:%M') for t in cst_times]
+            if cst_times.tz is None and (hasattr(x_range[0], 'tzinfo') and x_range[0].tzinfo):
+                cst_times = cst_times.tz_localize(cst)
+            kst_labels = [cst_to_kst(t.to_pydatetime() if hasattr(t, 'to_pydatetime') else t).strftime('%H:%M') for t in cst_times]
             tick_text = [f"{t.strftime('%H:%M')}<br><span style='color:#888;font-size:10px'>KST {kst}</span>" for t, kst in zip(cst_times, kst_labels)]
         
             if show_macd and show_dmi:

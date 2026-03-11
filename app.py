@@ -19,8 +19,8 @@ try:
     import trade_classifier
 except Exception as _e:
     st.error("앱 로드 실패 (아래 내용 복사해서 알려주세요)")
-        st.code(traceback.format_exc())
-        st.stop()
+    st.code(traceback.format_exc())
+    st.stop()
 
 KST = pytz.timezone("Asia/Seoul")
 CST = pytz.timezone("America/Chicago")

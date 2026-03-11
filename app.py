@@ -26,6 +26,15 @@ KST = pytz.timezone("Asia/Seoul")
 CST = pytz.timezone("America/Chicago")
 
 
+def kst_to_cst(dt_kst: datetime) -> datetime:
+    """KST → CST/CDT 변환 (서머타임 자동 반영, naive 반환)."""
+    if dt_kst is None:
+        return None
+    if dt_kst.tzinfo is None:
+        dt_kst = KST.localize(dt_kst)
+    return dt_kst.astimezone(CST).replace(tzinfo=None)
+
+
 def cst_to_kst(dt_cst: datetime) -> datetime:
     """CST/CDT → KST 변환 (서머타임 자동 반영, naive 반환)."""
     if dt_cst is None:
@@ -134,7 +143,7 @@ def parse_execution_file(file_path):
             symbol = str(row.get('종목코드', '')).strip() if '종목코드' in row else ''
             trades.append({
                 'datetime_kst': dt,
-                'datetime_cst': dt - timedelta(hours=int(15)),
+                'datetime_cst': kst_to_cst(dt),
                 'price': price,
                 'quantity': quantity,
                 'type': trade_type,
@@ -168,7 +177,7 @@ def parse_closing_file(file_path):
                     trade_date = str(trade_date_val).strip()
             
             if not trade_date:
-                trade_date = (dt - timedelta(hours=int(15))).strftime('%Y-%m-%d')
+                trade_date = kst_to_cst(dt).strftime('%Y-%m-%d')
             
             symbol = ''
             if '종목' in df.columns:
@@ -180,7 +189,7 @@ def parse_closing_file(file_path):
             
             closings.append({
                 'closing_time_kst': dt,
-                'closing_time_cst': dt - timedelta(hours=int(15)),
+                'closing_time_cst': kst_to_cst(dt),
                 'entry_price': float(row['매입가격']),
                 'exit_price': float(row['청산가격']),
                 'quantity': int(row['수량']),
@@ -278,7 +287,7 @@ def match_trades(executions, closings):
             entry_kst = closing['closing_time_kst'] - timedelta(minutes=int(2))
             matched.append({
                 'entry_time_kst': entry_kst,
-                'entry_time_cst': entry_kst - timedelta(hours=int(15)),
+                'entry_time_cst': kst_to_cst(entry_kst),
                 'exit_time_kst': closing['closing_time_kst'],
                 'exit_time_cst': closing['closing_time_cst'],
                 'entry_price': closing['entry_price'],

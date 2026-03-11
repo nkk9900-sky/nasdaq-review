@@ -2,6 +2,28 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 
+KST = pytz.timezone("Asia/Seoul")
+CST = pytz.timezone("America/Chicago")
+
+
+def kst_to_cst(dt_kst: datetime) -> datetime:
+    """KST → CST/CDT 변환 (서머타임 자동 반영, naive 반환)."""
+    if dt_kst is None:
+        return None
+    if dt_kst.tzinfo is None:
+        dt_kst = KST.localize(dt_kst)
+    return dt_kst.astimezone(CST).replace(tzinfo=None)
+
+
+def cst_to_kst(dt_cst: datetime) -> datetime:
+    """CST/CDT → KST 변환 (서머타임 자동 반영, naive 반환)."""
+    if dt_cst is None:
+        return None
+    if dt_cst.tzinfo is None:
+        dt_cst = CST.localize(dt_cst)
+    return dt_cst.astimezone(KST).replace(tzinfo=None)
+
+
 def parse_execution_file(file_path):
     """체결내역 파일 파싱"""
     df = pd.read_excel(file_path, header=1)
@@ -143,11 +165,10 @@ def match_trades(executions, closings):
     
     return matched_trades
 
-def convert_to_cst(dt):
-    """한국시간(KST)을 시카고시간(CST)으로 변환 - 15시간 빼기"""
-    if dt.tzinfo is None:
-        return dt - timedelta(hours=15)
-    return dt
+
+def convert_to_cst(dt: datetime) -> datetime:
+    """한국시간(KST)을 시카고시간(CST/CDT)으로 변환 (서머타임 자동 반영)."""
+    return kst_to_cst(dt)
 
 def get_matched_trades_from_files(exec_file_path, closing_file_path):
     """두 파일에서 매칭된 거래 데이터 반환 (KST와 CST 모두 보존)"""
@@ -167,8 +188,8 @@ def get_matched_trades_from_files(exec_file_path, closing_file_path):
     for trade in matched:
         trade['entry_time_kst'] = trade['entry_time']
         trade['exit_time_kst'] = trade['exit_time']
-        trade['entry_time_cst'] = convert_to_cst(trade['entry_time']) if trade['entry_time'].tzinfo is None else trade['entry_time']
-        trade['exit_time_cst'] = convert_to_cst(trade['exit_time']) if trade['exit_time'].tzinfo is None else trade['exit_time']
+        trade['entry_time_cst'] = convert_to_cst(trade['entry_time'])
+        trade['exit_time_cst'] = convert_to_cst(trade['exit_time'])
         trade['entry_time'] = trade['entry_time_cst']
         trade['exit_time'] = trade['exit_time_cst']
     

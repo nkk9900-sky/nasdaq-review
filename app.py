@@ -19,8 +19,21 @@ try:
     import trade_classifier
 except Exception as _e:
     st.error("앱 로드 실패 (아래 내용 복사해서 알려주세요)")
-    st.code(traceback.format_exc())
-    st.stop()
+        st.code(traceback.format_exc())
+        st.stop()
+
+KST = pytz.timezone("Asia/Seoul")
+CST = pytz.timezone("America/Chicago")
+
+
+def cst_to_kst(dt_cst: datetime) -> datetime:
+    """CST/CDT → KST 변환 (서머타임 자동 반영, naive 반환)."""
+    if dt_cst is None:
+        return None
+    if dt_cst.tzinfo is None:
+        dt_cst = CST.localize(dt_cst)
+    return dt_cst.astimezone(KST).replace(tzinfo=None)
+
 
 def load_trades_by_date(trade_date: str):
     db_trades = db.get_paired_trades_by_date(trade_date)
@@ -916,7 +929,7 @@ if available_dates:
                 x_range = [chart_range_start, chart_range_end]
         
             cst_times = pd.date_range(start=x_range[0], end=x_range[1], freq='15min')
-            kst_labels = [(t + timedelta(hours=int(15))).strftime('%H:%M') for t in cst_times]
+            kst_labels = [cst_to_kst(t).strftime('%H:%M') for t in cst_times]
             tick_text = [f"{t.strftime('%H:%M')}<br><span style='color:#888;font-size:10px'>KST {kst}</span>" for t, kst in zip(cst_times, kst_labels)]
         
             if show_macd and show_dmi:

@@ -379,7 +379,10 @@ def get_candle_data(date_str, symbol="NQ=F", data_source="yahoo", timeframe="1",
         
         return pd.DataFrame()
     except Exception as e:
-        st.error(f"데이터 조회 오류: {e}")
+        if db.is_network_unreachable_error(e):
+            st.error("차트 데이터 서버에 연결할 수 없습니다. 인터넷·DNS를 확인해 주세요.")
+        else:
+            st.error(f"데이터 조회 오류: {e}")
         return pd.DataFrame()
 
 def save_candles_to_cache(df, trade_date, symbol, timeframe):
@@ -454,9 +457,21 @@ st.title("나스닥 선물 복기 대시보드")
 try:
     available_dates = db.get_available_dates()
     _total_trades = len(db.get_all_paired_trades())
-except Exception:
+    _db_init_exc = None
+except Exception as e:
     available_dates = []
     _total_trades = 0
+    _db_init_exc = e
+
+if _db_init_exc is not None:
+    if db.is_network_unreachable_error(_db_init_exc):
+        st.error(
+            "**네트워크/DNS 오류**로 저장된 날짜 목록을 불러오지 못했습니다. "
+            "인터넷·VPN·Streamlit Secrets의 `SUPABASE_URL` 주소를 확인한 뒤 새로고침하세요."
+        )
+        st.caption(str(_db_init_exc))
+    else:
+        st.error(f"DB 초기화 오류: {_db_init_exc}")
 
 with st.sidebar:
     try:
@@ -670,7 +685,10 @@ if available_dates:
             else:
                 df = st.session_state.candle_cache[ck]
     except Exception as e:
-        st.error("DB 연결이 일시적으로 불안정합니다. 잠시 후 **새로고침** 해 주세요.")
+        if db.is_network_unreachable_error(e):
+            st.error("**네트워크/DNS 오류**로 데이터를 불러오지 못했습니다. 인터넷·VPN·Supabase URL을 확인한 뒤 새로고침하세요.")
+        else:
+            st.error("DB 연결이 일시적으로 불안정합니다. 잠시 후 **새로고침** 해 주세요.")
         st.caption(str(e))
         st.stop()
     
@@ -1373,6 +1391,8 @@ if available_dates:
 
     if not all_mae_mfe_list:
         st.warning("MAE/MFE 계산 가능한 거래가 없습니다. 각 날짜별로 차트를 한 번씩 조회해주세요. (캔들 캐시 필요)")
+        if len(all_trades) == 0:
+            st.caption("저장된 거래가 없거나, 네트워크/DNS 오류로 전체 목록을 가져오지 못한 경우입니다. 화면 상단 DB 안내를 확인하세요.")
     else:
         st.caption(f"전체 {len(all_mae_mfe_list)}건 거래 분석 ({len(set([x['날짜'] for x in all_mae_mfe_list]))}일)")
 

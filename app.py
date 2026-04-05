@@ -22,32 +22,6 @@ except Exception as _e:
     st.code(traceback.format_exc())
     st.stop()
 
-try:
-    from database import is_network_unreachable_error as network_unreachable_error
-except ImportError:
-    import socket
-
-    def network_unreachable_error(e):
-        if isinstance(e, socket.gaierror):
-            return True
-        if isinstance(e, (ConnectionError, TimeoutError, BrokenPipeError)):
-            return True
-        msg = str(e).lower()
-        for needle in (
-            "name or service not known",
-            "temporary failure in name resolution",
-            "failed to resolve",
-            "nodename nor servname",
-            "getaddrinfo failed",
-            "could not resolve host",
-        ):
-            if needle in msg:
-                return True
-        err = getattr(e, "errno", None)
-        if err is not None and err in (-2, 11001, 11002):
-            return True
-        return False
-
 KST = pytz.timezone("Asia/Seoul")
 CST = pytz.timezone("America/Chicago")
 
@@ -405,10 +379,7 @@ def get_candle_data(date_str, symbol="NQ=F", data_source="yahoo", timeframe="1",
         
         return pd.DataFrame()
     except Exception as e:
-        if network_unreachable_error(e):
-            st.error("차트 데이터 서버에 연결할 수 없습니다. 인터넷·DNS를 확인해 주세요.")
-        else:
-            st.error(f"데이터 조회 오류: {e}")
+        st.error(f"데이터 조회 오류: {e}")
         return pd.DataFrame()
 
 def save_candles_to_cache(df, trade_date, symbol, timeframe):
@@ -431,73 +402,14 @@ def save_candles_to_cache(df, trade_date, symbol, timeframe):
         print(f"Cache save error: {e}")
     return 0
 
-
-def calculate_mae_mfe(trade, df_candles):
-    try:
-        if df_candles is None or df_candles.empty:
-            return None, None
-
-        cst = pytz.timezone('America/Chicago')
-        entry_cst = trade['entry_time_cst']
-        exit_cst = trade['exit_time_cst']
-        entry_price = trade['entry_price']
-        trade_type = trade.get('type', '')
-
-        if entry_cst.tzinfo is None:
-            entry_cst = cst.localize(entry_cst)
-        if exit_cst.tzinfo is None:
-            exit_cst = cst.localize(exit_cst)
-
-        df_tz = df_candles.copy()
-        if df_tz.index.tz is None:
-            df_tz.index = df_tz.index.tz_localize(cst)
-
-        mask = (df_tz.index >= entry_cst) & (df_tz.index <= exit_cst)
-        df_between = df_tz[mask]
-
-        if df_between.empty:
-            mask2 = (df_tz.index >= entry_cst - timedelta(minutes=5)) & \
-                    (df_tz.index <= exit_cst + timedelta(minutes=5))
-            df_between = df_tz[mask2]
-
-        if df_between.empty:
-            return None, None
-
-        highest = df_between['High'].max()
-        lowest = df_between['Low'].min()
-
-        if '매수' in trade_type:
-            mae = round(entry_price - lowest, 2)
-            mfe = round(highest - entry_price, 2)
-        else:
-            mae = round(highest - entry_price, 2)
-            mfe = round(entry_price - lowest, 2)
-
-        return mae, mfe
-    except Exception as e:
-        return None, None
-
-
 st.title("나스닥 선물 복기 대시보드")
 
 try:
     available_dates = db.get_available_dates()
     _total_trades = len(db.get_all_paired_trades())
-    _db_init_exc = None
-except Exception as e:
+except Exception:
     available_dates = []
     _total_trades = 0
-    _db_init_exc = e
-
-if _db_init_exc is not None:
-    if network_unreachable_error(_db_init_exc):
-        st.error(
-            "**네트워크/DNS 오류**로 저장된 날짜 목록을 불러오지 못했습니다. "
-            "인터넷·VPN·Streamlit Secrets의 `SUPABASE_URL` 주소를 확인한 뒤 새로고침하세요."
-        )
-        st.caption(str(_db_init_exc))
-    else:
-        st.error(f"DB 초기화 오류: {_db_init_exc}")
 
 with st.sidebar:
     try:
@@ -711,10 +623,7 @@ if available_dates:
             else:
                 df = st.session_state.candle_cache[ck]
     except Exception as e:
-        if network_unreachable_error(e):
-            st.error("**네트워크/DNS 오류**로 데이터를 불러오지 못했습니다. 인터넷·VPN·Supabase URL을 확인한 뒤 새로고침하세요.")
-        else:
-            st.error("DB 연결이 일시적으로 불안정합니다. 잠시 후 **새로고침** 해 주세요.")
+        st.error("DB 연결이 일시적으로 불안정합니다. 잠시 후 **새로고침** 해 주세요.")
         st.caption(str(e))
         st.stop()
     
@@ -1209,29 +1118,6 @@ if available_dates:
 | **진입** | {entry_p:.2f} | {entry_kst} | {entry_cst_str} |
 | **청산** | {exit_p:.2f} | {exit_kst} | {exit_cst_str} |"""
                 )
-
-                mae, mfe = calculate_mae_mfe(focused_trade, df_chart_data if df_chart_data is not None else None)
-                if mae is not None:
-                    st.markdown("**📊 진입 후 가격 움직임**")
-                    col_mae, col_mfe = st.columns(2)
-                    with col_mae:
-                        st.metric(
-                            label="MAE (최대 역행)",
-                            value=f"{mae:.1f}P",
-                            delta=f"{'하락' if '매수' in focused_trade['type'] else '상승'}",
-                            delta_color="inverse",
-                            help="진입 후 포지션에 불리한 방향으로 최대 몇 포인트 역행했는지"
-                        )
-                    with col_mfe:
-                        st.metric(
-                            label="MFE (최대 이익)",
-                            value=f"{mfe:.1f}P",
-                            delta=f"{'상승' if '매수' in focused_trade['type'] else '하락'}",
-                            delta_color="normal",
-                            help="진입 후 포지션에 유리한 방향으로 최대 몇 포인트 갔는지"
-                        )
-                else:
-                    st.caption("MAE/MFE: 차트 데이터 없음")
             
             with detail_right:
                 focused_cls = None
@@ -1371,129 +1257,6 @@ if available_dates:
                             msg = cls['messages'].get(key, '')
                             st.markdown(f"{icon} **{label}**")
                             st.caption(msg)
-
-    st.divider()
-    st.subheader("📊 MAE/MFE 분석 - 손절선 설정 도우미")
-
-    # 전체 저장된 거래의 MAE/MFE 계산 (날짜별 캔들 캐시 활용)
-    all_trades = db.get_all_paired_trades()
-    all_mae_mfe_list = []
-
-    for t in all_trades:
-        trade_date_str = t['entry_time_cst'][:10] if isinstance(t['entry_time_cst'], str) else t['entry_time_cst'].strftime('%Y-%m-%d')
-        entry_dt = datetime.fromisoformat(t['entry_time_cst']) if isinstance(t['entry_time_cst'], str) else t['entry_time_cst']
-        exit_dt = datetime.fromisoformat(t['exit_time_cst']) if isinstance(t['exit_time_cst'], str) else t['exit_time_cst']
-
-        # 해당 날짜 캔들 캐시에서 가져오기
-        cached = db.get_cached_candles(trade_date_str, "NQ=F", "1m")
-        if not cached:
-            cached = db.get_cached_candles(trade_date_str, "NQ=F", "3m")
-
-        if cached:
-            cst = pytz.timezone('America/Chicago')
-            df_c = pd.DataFrame(cached)
-            df_c['timestamp'] = pd.to_datetime(df_c['timestamp'])
-            df_c.set_index('timestamp', inplace=True)
-            df_c.columns = [c.capitalize() for c in df_c.columns]
-            df_c.index = df_c.index.tz_localize(cst)
-
-            trade_obj = {
-                'entry_time_cst': entry_dt,
-                'exit_time_cst': exit_dt,
-                'entry_price': t['entry_price'],
-                'type': t['type']
-            }
-            mae, mfe = calculate_mae_mfe(trade_obj, df_c)
-            if mae is not None:
-                entry_kst = datetime.fromisoformat(t['entry_time_kst']) if isinstance(t['entry_time_kst'], str) else t['entry_time_kst']
-                all_mae_mfe_list.append({
-                    '날짜': trade_date_str,
-                    '진입시간': entry_kst.strftime("%m/%d %H:%M"),
-                    '구분': t['type'],
-                    'MAE': mae,
-                    'MFE': mfe,
-                    '손익': t['profit']
-                })
-
-    if not all_mae_mfe_list:
-        st.warning("MAE/MFE 계산 가능한 거래가 없습니다. 각 날짜별로 차트를 한 번씩 조회해주세요. (캔들 캐시 필요)")
-        if len(all_trades) == 0:
-            st.caption("저장된 거래가 없거나, 네트워크/DNS 오류로 전체 목록을 가져오지 못한 경우입니다. 화면 상단 DB 안내를 확인하세요.")
-    else:
-        st.caption(f"전체 {len(all_mae_mfe_list)}건 거래 분석 ({len(set([x['날짜'] for x in all_mae_mfe_list]))}일)")
-
-        tab1, tab2 = st.tabs(["MAE 분포 (손절선 결정)", "MFE vs MAE 산점도"])
-        mae_df = pd.DataFrame(all_mae_mfe_list)
-
-        with tab1:
-            colors = ['#FF4444' if '매수' in g else '#4444FF' for g in mae_df['구분']]
-            fig_mae = go.Figure(go.Bar(
-                x=mae_df['진입시간'],
-                y=mae_df['MAE'],
-                marker_color=colors,
-                text=mae_df['MAE'].apply(lambda x: f"{x:.1f}P"),
-                textposition='outside',
-                hovertemplate='%{x}<br>MAE: %{y:.1f}P<extra></extra>'
-            ))
-            fig_mae.update_layout(
-                title=f"전체 거래 MAE 분포 (빨강=매수, 파랑=매도)",
-                xaxis_title="진입시간",
-                yaxis_title="MAE (포인트)",
-                height=400,
-                template="plotly_dark"
-            )
-            st.plotly_chart(fig_mae, use_container_width=True)
-
-            m1, m2, m3, m4 = st.columns(4)
-            with m1:
-                st.metric("평균 MAE", f"{mae_df['MAE'].mean():.1f}P")
-            with m2:
-                st.metric("최대 MAE", f"{mae_df['MAE'].max():.1f}P")
-            with m3:
-                st.metric("중앙값 MAE", f"{mae_df['MAE'].median():.1f}P")
-            with m4:
-                buy_df = mae_df[mae_df['구분'].str.contains('매수')]
-                sell_df = mae_df[mae_df['구분'].str.contains('매도')]
-                st.metric("매수 평균 MAE", f"{buy_df['MAE'].mean():.1f}P" if len(buy_df) else "-")
-
-            st.markdown("#### 🎯 손절선 시뮬레이터")
-            stop_loss = st.slider("손절선 설정 (포인트)", 1.0, 50.0, 10.0, 0.5)
-            survived = mae_df[mae_df['MAE'] <= stop_loss]
-            total = len(mae_df)
-            profit_survived = survived[survived['손익'] > 0]
-            st.info(
-                f"손절선 **{stop_loss}P** 기준 →  "
-                f"손절 안 당하는 거래: **{len(survived)}건 / {total}건 ({len(survived)/total*100:.0f}%)**  |  "
-                f"그 중 수익: **{len(profit_survived)}건**"
-            )
-
-        with tab2:
-            colors_scatter = ['#FF4444' if p > 0 else '#4444FF' for p in mae_df['손익']]
-            fig_scatter = go.Figure()
-            fig_scatter.add_trace(go.Scatter(
-                x=mae_df['MAE'],
-                y=mae_df['MFE'],
-                mode='markers',
-                marker=dict(size=12, color=colors_scatter),
-                customdata=mae_df[['진입시간', '구분', '손익']].values,
-                hovertemplate='진입: %{customdata[0]}<br>구분: %{customdata[1]}<br>MAE: %{x:.1f}P<br>MFE: %{y:.1f}P<br>손익: $%{customdata[2]:.2f}<extra></extra>',
-                showlegend=False
-            ))
-            max_val = max(mae_df['MAE'].max(), mae_df['MFE'].max()) + 5
-            fig_scatter.add_trace(go.Scatter(
-                x=[0, max_val], y=[0, max_val],
-                mode='lines',
-                line=dict(color='gray', dash='dash', width=1),
-                name='MAE=MFE 기준선'
-            ))
-            fig_scatter.update_layout(
-                title="MFE vs MAE (빨강=수익, 파랑=손실)",
-                xaxis_title="MAE (최대 역행 포인트)",
-                yaxis_title="MFE (최대 이익 포인트)",
-                height=450,
-                template="plotly_dark"
-            )
-            st.plotly_chart(fig_scatter, use_container_width=True)
 
 else:
     st.info("👈 좌측 사이드바에서 체결내역과 청산내역 파일을 업로드하고 '매칭 분석 시작' 버튼을 클릭하세요.")

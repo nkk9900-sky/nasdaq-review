@@ -1,6 +1,5 @@
 import os
 import time
-import socket
 import sqlite3
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
@@ -8,59 +7,18 @@ import json
 
 DB_PATH = "trades.db"
 
-
-def is_network_unreachable_error(e: BaseException) -> bool:
-    """DNS 실패·이름 조회 불가 등 재시도해도 소용없는 네트워크 오류."""
-    if isinstance(e, socket.gaierror):
-        return True
-    if isinstance(e, (ConnectionError, TimeoutError, BrokenPipeError)):
-        return True
-    msg = str(e).lower()
-    for needle in (
-        "name or service not known",
-        "temporary failure in name resolution",
-        "failed to resolve",
-        "nodename nor servname",
-        "getaddrinfo failed",
-        "could not resolve host",
-        "name resolution",
-    ):
-        if needle in msg:
-            return True
-    errno = getattr(e, "errno", None)
-    if errno is not None and errno in (-2, 11001, 11002):
-        return True
-    return False
-
-
-def _is_network_unreachable_error(e: BaseException) -> bool:
-    return is_network_unreachable_error(e)
-
-
 def _sb_retry(fn, max_attempts=5):
-    """Supabase HTTP 호출 일시 오류 시 재시도. DNS/이름조회 실패는 재시도하지 않음."""
+    """Supabase HTTP 호출 일시 오류 시 재시도 (ReadError/Errno 11 등)."""
     last = None
     for attempt in range(max_attempts):
         try:
             return fn()
         except Exception as e:
             last = e
-            if _is_network_unreachable_error(e):
-                raise
             if attempt >= max_attempts - 1:
                 raise
             time.sleep(1.5)
     raise last
-
-
-def _sb_safe_read(fn, default):
-    """읽기 전용: 네트워크/DNS 오류 시 예외 대신 default 반환."""
-    try:
-        return _sb_retry(fn)
-    except Exception as e:
-        if _is_network_unreachable_error(e):
-            return default
-        raise
 
 # Supabase 사용 여부 (Streamlit Cloud 등에서 환경변수 설정 시)
 USE_SUPABASE = bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"))
@@ -315,7 +273,7 @@ def get_available_dates() -> List[str]:
             dates = list(seen)
             dates.sort(reverse=True)
             return dates
-        return _sb_safe_read(_fetch, [])
+        return _sb_retry(_fetch)
     if USE_SUPABASE:
         return []
     conn = get_connection()
@@ -349,7 +307,7 @@ def get_paired_trades_by_date(trade_date: str, symbol: Optional[str] = None) -> 
                 q = q.eq("symbol", symbol)
             r = q.execute()
             return [_row_to_trade(row) for row in (r.data or [])]
-        return _sb_safe_read(_fetch, [])
+        return _sb_retry(_fetch)
     if USE_SUPABASE:
         return []
     conn = get_connection()
@@ -368,7 +326,7 @@ def get_all_paired_trades() -> List[Dict]:
         def _fetch():
             r = sb.table("paired_trades").select("*").order("entry_time_cst", desc=True).execute()
             return [_row_to_trade(row) for row in (r.data or [])]
-        return _sb_safe_read(_fetch, [])
+        return _sb_retry(_fetch)
     if USE_SUPABASE:
         return []
     conn = get_connection()
@@ -422,7 +380,7 @@ def check_date_exists(trade_date: str) -> bool:
         def _fetch():
             r = sb.table("paired_trades").select("id").eq("trade_date_cst", trade_date).limit(1).execute()
             return len(r.data or []) > 0
-        return _sb_safe_read(_fetch, False)
+        return _sb_retry(_fetch)
     if USE_SUPABASE:
         return False
     conn = get_connection()
@@ -490,7 +448,7 @@ def get_cached_candles(trade_date: str, symbol: str, timeframe: str) -> List[Dic
                     break
                 offset += chunk
             return all_rows
-        return _sb_safe_read(_fetch, [])
+        return _sb_retry(_fetch)
     if USE_SUPABASE:
         return []
     conn = get_connection()
@@ -506,7 +464,7 @@ def has_cached_candles(trade_date: str, symbol: str, timeframe: str) -> bool:
         def _fetch():
             r = sb.table("candle_cache").select("id").eq("trade_date", trade_date).eq("symbol", symbol).eq("timeframe", timeframe).limit(1).execute()
             return len(r.data or []) > 0
-        return _sb_safe_read(_fetch, False)
+        return _sb_retry(_fetch)
     if USE_SUPABASE:
         return False
     conn = get_connection()

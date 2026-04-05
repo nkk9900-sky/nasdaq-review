@@ -22,6 +22,32 @@ except Exception as _e:
     st.code(traceback.format_exc())
     st.stop()
 
+try:
+    from database import is_network_unreachable_error as network_unreachable_error
+except ImportError:
+    import socket
+
+    def network_unreachable_error(e):
+        if isinstance(e, socket.gaierror):
+            return True
+        if isinstance(e, (ConnectionError, TimeoutError, BrokenPipeError)):
+            return True
+        msg = str(e).lower()
+        for needle in (
+            "name or service not known",
+            "temporary failure in name resolution",
+            "failed to resolve",
+            "nodename nor servname",
+            "getaddrinfo failed",
+            "could not resolve host",
+        ):
+            if needle in msg:
+                return True
+        err = getattr(e, "errno", None)
+        if err is not None and err in (-2, 11001, 11002):
+            return True
+        return False
+
 KST = pytz.timezone("Asia/Seoul")
 CST = pytz.timezone("America/Chicago")
 
@@ -379,7 +405,7 @@ def get_candle_data(date_str, symbol="NQ=F", data_source="yahoo", timeframe="1",
         
         return pd.DataFrame()
     except Exception as e:
-        if db.is_network_unreachable_error(e):
+        if network_unreachable_error(e):
             st.error("차트 데이터 서버에 연결할 수 없습니다. 인터넷·DNS를 확인해 주세요.")
         else:
             st.error(f"데이터 조회 오류: {e}")
@@ -464,7 +490,7 @@ except Exception as e:
     _db_init_exc = e
 
 if _db_init_exc is not None:
-    if db.is_network_unreachable_error(_db_init_exc):
+    if network_unreachable_error(_db_init_exc):
         st.error(
             "**네트워크/DNS 오류**로 저장된 날짜 목록을 불러오지 못했습니다. "
             "인터넷·VPN·Streamlit Secrets의 `SUPABASE_URL` 주소를 확인한 뒤 새로고침하세요."
@@ -685,7 +711,7 @@ if available_dates:
             else:
                 df = st.session_state.candle_cache[ck]
     except Exception as e:
-        if db.is_network_unreachable_error(e):
+        if network_unreachable_error(e):
             st.error("**네트워크/DNS 오류**로 데이터를 불러오지 못했습니다. 인터넷·VPN·Supabase URL을 확인한 뒤 새로고침하세요.")
         else:
             st.error("DB 연결이 일시적으로 불안정합니다. 잠시 후 **새로고침** 해 주세요.")
